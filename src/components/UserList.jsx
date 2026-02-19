@@ -1,161 +1,200 @@
 import {
-    Table,
-    TableBody,
-    TableContainer,
-    TableHead,
-    TableCell,
     Typography,
-    TableRow,
-    Paper,
-    TablePagination,
-    useTheme,
     Box,
-    IconButton,
-    TableFooter,
+    Avatar,
+    Chip,
+    Paper,
+    TextField,
+    InputAdornment
 } from "@mui/material";
+import { DataGrid } from '@mui/x-data-grid';
 import axios from "axios";
-import React, { useEffect, useState } from "react";
-import { FirstPage, KeyboardArrowLeft, KeyboardArrowRight, LastPage } from "@mui/icons-material";
+import { useEffect, useState } from "react";
+import { Person, Search } from "@mui/icons-material";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 
-function TablePaginationActions(props) {
-    const theme = useTheme();
-    const { count, page, rowsPerPage, onPageChange } = props;
-
-    const handleFirstPageButtonClick = (event) => {
-        onPageChange(event, 0);
-    };
-
-    const handleBackButtonClick = (event) => {
-        onPageChange(event, page - 1);
-    };
-
-    const handleNextButtonClick = (event) => {
-        onPageChange(event, page + 1);
-    };
-
-    const handleLastPageButtonClick = (event) => {
-        onPageChange(event, Math.max(0, Math.ceil(count / rowsPerPage) - 1));
-    };
-
-    return (
-        <Box sx={{ flexShrink: 0, ml: 2.5 }}>
-            <IconButton onClick={handleFirstPageButtonClick} disabled={page === 0} aria-label="first page">
-                {theme.direction === "rtl" ? <LastPage /> : <FirstPage />}
-            </IconButton>
-            <IconButton onClick={handleBackButtonClick} disabled={page === 0} aria-label="previous page">
-                {theme.direction === "rtl" ? <KeyboardArrowRight /> : <KeyboardArrowLeft />}
-            </IconButton>
-            <IconButton
-                onClick={handleNextButtonClick}
-                disabled={page >= Math.ceil(count / rowsPerPage) - 1}
-                aria-label="next page"
-            >
-                {theme.direction === "rtl" ? <KeyboardArrowLeft /> : <KeyboardArrowRight />}
-            </IconButton>
-            <IconButton
-                onClick={handleLastPageButtonClick}
-                disabled={page >= Math.ceil(count / rowsPerPage) - 1}
-                aria-label="last page"
-            >
-                {theme.direction === "rtl" ? <FirstPage /> : <LastPage />}
-            </IconButton>
-        </Box>
-    );
+// Simple debounce hook implementation if not available
+function useDebounceValue(value, delay) {
+    const [debouncedValue, setDebouncedValue] = useState(value);
+    useEffect(() => {
+        const handler = setTimeout(() => {
+            setDebouncedValue(value);
+        }, delay);
+        return () => {
+            clearTimeout(handler);
+        };
+    }, [value, delay]);
+    return debouncedValue;
 }
 
+const fetchUsersData = async ({ paginationModel, sortModel, debouncedSearchQuery }) => {
+    const { page, pageSize } = paginationModel;
+    const skip = page * pageSize;
+    
+    let url = "https://dummyjson.com/users";
+    const params = {
+        limit: pageSize,
+        skip: skip,
+        select: "firstName,lastName,email,phone,birthDate,age,gender,image,id",
+    };
+
+    // Handle Search
+    if (debouncedSearchQuery) {
+        url = "https://dummyjson.com/users/search";
+        params.q = debouncedSearchQuery;
+    }
+
+    // Handle Sorting
+    if (sortModel.length > 0) {
+        const { field, sort } = sortModel[0];
+        params.sortBy = field;
+        params.order = sort;
+    }
+
+    const { data } = await axios.get(url, { params });
+    return data;
+};
+
 const UserList = () => {
-    const [users, setUsers] = useState([]);
-    const [total, setTotal] = useState(0);
-    const [page, setPage] = useState(0);
-    const [rowsPerPage, setRowsPerPage] = useState(5);
+    // DataGrid State
+    const [paginationModel, setPaginationModel] = useState({
+        page: 0,
+        pageSize: 10,
+    });
+    const [sortModel, setSortModel] = useState([]);
+    const [searchQuery, setSearchQuery] = useState("");
+    
+    const debouncedSearchQuery = useDebounceValue(searchQuery, 500);
 
-    const handlePageChange = (_event, newPage) => {
-        setPage(newPage);
-    };
+    const { data, isLoading } = useQuery({
+        queryKey: ['users', paginationModel, sortModel, debouncedSearchQuery],
+        queryFn: () => fetchUsersData({ paginationModel, sortModel, debouncedSearchQuery }),
+        placeholderData: keepPreviousData,
+    });
+    const users = data?.users || [];
+    const total = data?.total || 0;
 
-    const handleChangeRowsPerPage = (event) => {
-        setRowsPerPage(parseInt(event.target.value, 10));
-        setPage(0);
-    };
-
-    useEffect(() => {
-        const limit = rowsPerPage;
-        const skip = page * rowsPerPage;
-        console.log(page, rowsPerPage); 
-        axios
-            .get("https://dummyjson.com/users", {
-                params: {
-                    limit,
-                    skip,
-                    select: "firstName,lastName,email,phone,birthDate,age,gender",
-                },
-            })
-            .then((response) => {
-                setUsers(response.data.users || []);
-                setTotal(response.data.total || 0);
-            })
-            .catch((error) => console.error(error));
-    }, [page, rowsPerPage]);
+    // Columns definition
+    const columns = [
+        { 
+            field: 'id', 
+            headerName: 'ID', 
+            width: 70 
+        },
+        {
+            field: 'firstName',
+            headerName: 'User',
+            width: 250,
+            renderCell: (params) => (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, height: '100%' }}>
+                    <Avatar 
+                        src={params.row.image} 
+                        alt={params.row.firstName} 
+                        sx={{ width: 32, height: 32 }} 
+                    />
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {`${params.row.firstName} ${params.row.lastName}`}
+                    </Typography>
+                </Box>
+            ),
+            valueGetter: (value, row) => `${row.firstName || ''} ${row.lastName || ''}`,
+        },
+        {
+            field: 'email',
+            headerName: 'Email',
+            width: 250,
+        },
+        {
+            field: 'phone',
+            headerName: 'Phone',
+            width: 180,
+            sortable: false, // API might not support sorting by phone easily, but let's leave it unless it breaks
+        },
+        {
+            field: 'birthDate',
+            headerName: 'Date of Birth',
+            width: 150,
+        },
+        {
+            field: 'age',
+            headerName: 'Age',
+            type: 'number',
+            width: 100,
+        },
+        {
+            field: 'gender',
+            headerName: 'Gender',
+            width: 120,
+            renderCell: (params) => (
+                <Chip
+                    label={params.value}
+                    size="small"
+                    color={params.value === 'male' ? 'primary' : 'secondary'}
+                    variant="outlined"
+                    sx={{ textTransform: 'capitalize' }}
+                />
+            ),
+        },
+    ];
 
     return (
-        <TableContainer component={Paper}>
-            <Table sx={{ minWidth: 650 }} size="small" aria-label="user table">
-                <TableHead>
-                    <TableRow>
-                        <TableCell>First Name</TableCell>
-                        <TableCell>Last Name</TableCell>
-                        <TableCell>Email</TableCell>
-                        <TableCell>Phone</TableCell>
-                        <TableCell>Date of Birth</TableCell>
-                        <TableCell>Age</TableCell>
-                        <TableCell>Gender</TableCell>
-                    </TableRow>
-                </TableHead>
-                <TableBody>
-                    {users.length > 0 ? (
-                        users.map((user) => (
-                            <TableRow key={user.id}>
-                                <TableCell>{user.firstName}</TableCell>
-                                <TableCell>{user.lastName}</TableCell>
-                                <TableCell>{user.email}</TableCell>
-                                <TableCell>{user.phone}</TableCell>
-                                <TableCell>{user.birthDate}</TableCell>
-                                <TableCell>{user.age}</TableCell>
-                                <TableCell>{user.gender}</TableCell>
-                            </TableRow>
-                        ))
-                    ) : (
-                        <TableRow>
-                            <TableCell colSpan={7}>
-                                <Typography>No Data</Typography>
-                            </TableCell>
-                        </TableRow>
-                    )}
-                </TableBody>
-                <TableFooter>
-                    <TableRow>
-                        <TablePagination
-                            rowsPerPageOptions={[5, 10, 15]}
-                            colSpan={7}
-                            count={total}
-                            rowsPerPage={rowsPerPage}
-                            page={page}
-                            slotProps={{
-                                select: {
-                                    inputProps: {
-                                        "aria-label": "rows per page",
-                                    },
-                                    native: true,
-                                },
-                            }}
-                            onPageChange={handlePageChange}
-                            onRowsPerPageChange={handleChangeRowsPerPage}
-                            ActionsComponent={TablePaginationActions}
-                        />
-                    </TableRow>
-                </TableFooter>
-            </Table>
-        </TableContainer>
+        <Box sx={{ width: '100%', maxWidth: 1200, margin: '0 auto' }}>
+            <Box sx={{ mb: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Avatar sx={{ bgcolor: 'primary.main' }}>
+                        <Person />
+                    </Avatar>
+                    <Typography variant="h4" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                        User Management
+                    </Typography>
+                </Box>
+                <TextField
+                    variant="outlined"
+                    size="small"
+                    placeholder="Search users..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    InputProps={{
+                        startAdornment: (
+                            <InputAdornment position="start">
+                                <Search color="action" />
+                            </InputAdornment>
+                        ),
+                    }}
+                    sx={{ minWidth: 300, bgcolor: 'background.paper' }}
+                />
+            </Box>
+
+            <Paper sx={{ width: '100%', mb: 2, borderRadius: 2, overflow: 'hidden', boxShadow: 3 }}>
+                <DataGrid
+                    rows={users}
+                    columns={columns}
+                    rowCount={total}
+                    loading={isLoading}
+                    pageSizeOptions={[5, 10, 25, 50]}
+                    paginationModel={paginationModel}
+                    paginationMode="server"
+                    onPaginationModelChange={setPaginationModel}
+                    sortingMode="server"
+                    sortModel={sortModel}
+                    onSortModelChange={setSortModel}
+                    disableRowSelectionOnClick
+                    autoHeight
+                    sx={{
+                        border: 'none',
+                        '& .MuiDataGrid-cell': {
+                            borderColor: 'divider',
+                        },
+                        '& .MuiDataGrid-columnHeaders': {
+                            backgroundColor: 'action.hover',
+                            borderBottom: '2px solid',
+                            borderColor: 'divider',
+                            fontWeight: 700,
+                        },
+                    }}
+                />
+            </Paper>
+        </Box>
     );
 };
 
